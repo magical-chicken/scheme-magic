@@ -2,7 +2,7 @@
 ;; from timeless and infinite structures to beyond
 ;; EXPLORE STRUCTURAL MAGIC
 
-;;define delay as special form called promise
+;; define delay as special form called promise
 ;; as (memoize (lambda () <exp>))
 (define (memoize f)
   (let ((run-once #f)
@@ -15,12 +15,14 @@
 	    (set! result (f))
 	    result)))))
 
+;; my own version of delay
 (define-syntax promise
   (syntax-rules ()
     ((promise exp)
      (memoize
       (lambda ()
 	exp)))))
+
 (define (force-promise p)
   (p))
 
@@ -223,10 +225,6 @@ n  (cond ((null? s) '())
       (caddr q)
       (error 'not-a-queue)))
 
-(define-syntax @q
-  (syntax-rules ()
-    ((@q lst ...)
-     (queue lst ...))))
 
 ;; deque -> it is bad written, but it was useful
 ;; to understand how conses actually work with
@@ -475,7 +473,7 @@ n  (cond ((null? s) '())
 	   (else (assoc-step key (cdr table)))))
 	(assoc-step key t))
 
-n      
+
       (define (put! key val)
 	(let ((prev (assoc key)))
 	  (if prev
@@ -503,192 +501,150 @@ n
 	      (put! table args result)
 	      result))))))
 
+;;Multi-Dimensional Table
+
+;; I don't want to introduce exception handling for now,
+;; but I'm wondering if there is a nice way to check types
+;; for constructors that return a procedure.
+
+(define (tablep obj)
+  (and (procedure? obj)
+       (eq? '_sym_table
+	    (cadr (procedure-information obj))
+	    )))
+
+;; It DOES work, but its a lot of code and I'm sure
+;; there is a better way to design this structure.
 
 (define (make-table cmp)
   (let ((table (list '*table*))
 	(cmp cmp))
-    (lambda (sym)
-
-      (define (key node) (car node))
-      (define (val node) (cadr node))
-      (define (rest node) (cddr node))
-      (define (left node) (car (rest node)))
-      (define (right node) (cdr (rest node)))
-      (define (mtnode val fkey . keys)
-	(if (null? keys)
-	    (cons fkey
-		  (cons val
-			(cons 'L 'R)))
-	    (cons fkey
-		  (cons
-		   (apply mtnode (cons val keys))
-		   (cons 'L 'R)))))
-
-      ;; REFACTORING NEEDED!!!    
-      (define (put! value fkey . keys)
-	(define (put-step! node v f . r)
-	  (let ((knode (key node)))
-	    (cond
-	     ((eq? f knode)
-	      (if (null? r)
-		  (set-car! (cdr node) v)
-		  (apply put-step! (cons (val node)
-					 (cons v r)))))
-	     ((cmp f knode)
-	      (let ((right-node (right node)))
-		(cond
-		 ((and (eq? 'R right-node)
-		       (null? r))
-		  (set-cdr! (rest node) v))
-		 ((eq? 'R right-node)
-		  (set-cdr! (rest node)
-			    (apply mtnode
-				   (cons v r))))
-		 (else (apply put-step! (cons right-node
-					      (cons v r)))))))
-	     (else
-	      (let ((left-node (left node)))
-		(cond
-		 ((and (eq? 'L left-node)
-		       (null? r))
-		  (set-cdr! (rest node) v))
-		 ((eq? 'L left-node)
-		  (set-cdr! (rest node)
-			    (apply mtnode
-				   (cons v r))))
-		 (else (apply put-step! (cons left-node
-					      (cons v r))))))))					    	  ))
-	(if (null? (cdr table))
-	    (set-cdr! table (apply mtnode (cons value (cons fkey keys))))
-	    (apply put-step! (cons (cdr table)
-				   (cons value (cons fkey keys)))))
-	table)
-
-      (cond
-       ((eq? sym 'put!) put!)
-       (else (error 'definition-not-found-TABLE)))
-      )))
+    (lambda (_sym_table)
       
-    
-
-
-(define (mtnode val fkey . keys)
-  (if (null? keys)
-      (cons fkey
-	    (cons val
-		  (cons 'L 'R)))
-      (cons fkey
-	    (cons
-	     (apply mtnode (cons val keys))
-	     (cons 'L 'R)))))
-
-(define (make-table-node key val)
-  (cons key
-	(cons val
-	      (cons 'L 'R))))
-  
-
-;;todo: check how to implement an hash table
-;;todo: check how to implement an hash function
-;;todo: check how to implement a randomic function 
-#|      (define (init)
-	(let ((pair (cons 'L 'R)))
-	  (let ((rest (if (null? keys)
-			  (cons val pair)
-			  (cons
-			   (apply make-table
-				  (cons val keys))
-			   pair))))
-(cons key rest))))|#
-
-(define (make-table cmp)
-  (let ((table (list '*table*))
-	(cmp cmp))
-    (lambda (sym)
-      (define (make-node k v)
-	(append (list k v)
-		(cons 'L 'R)))
+      (define (assoc . keys)
+	(define (assoc-step node . keys)
+	  (cond
+	   ((or
+	     (atom? node)
+	     (null? node)
+	     (null? keys)) #f)
+	   ((cmp (car keys)
+		 (get-key node))
+	    (apply assoc-step (cons (get-right node)
+				    keys)))
+	   ((eq? (car keys)
+		 (get-key node))
+	    (cond
+	     ((null? (cdr keys)) (get-val node))
+	     ((tablep (get-val node))
+	      (apply ((get-val node) 'assoc) (cdr keys)))
+	     (else #f)))
+	   (else
+	    (apply assoc-step (cons (get-left node)
+				    keys)))))
+	(apply assoc-step (cons (cdr table) keys)))
+      
+      (define (get-val node) (cadr node))
       (define (get-children node) (cddr node))
       (define (get-right node) (cdr (get-children node)))
       (define (get-left node) (car (get-children node)))
-      (define (get-val node) (cadr node))
       (define (get-key node) (car node))
+
+      (define (set-val! node val) (set-car! (cdr node) val))
       (define (set-right! node val)
-	(set-cdr! (get-children node) val))
+	(set-cdr!(get-children node) val))
       (define (set-left! node val)
 	(set-car! (get-children node) val))
-      (define (set-val! node val)
-	(set-car! (cdr node) val))
-      (define (get-access child)
-	(if (eq? 'R child)
-	    get-right
-	    get-left))
-      (define (get-modifier child)
-	(if (eq? 'R child)
-	    set-right!
-	    set-left!))
 
-      (define (assoc key)
-	(define (assoc-step k node)
+      (define (make-node val key . keys)
+	(if (null? keys)
+	    (append (list key val) (cons 'L 'R))
+	    (append (list key
+			  (let ((new-table (make-table cmp)))
+			    (apply (new-table 'insert!)
+				   (cons val keys))
+			    new-table))
+		    (cons 'L 'R))))
+
+      (define (create-child-inserter sym)
+	(let ((getter (if (eq? 'R sym)
+			  get-right
+			  get-left))
+	      (setter! (if (eq? 'R sym)
+			   set-right!
+			   set-left!)))
+	  (lambda (node val key . keys)
+	    (if (eq? sym (getter node))
+		(setter! node (apply make-node
+				     (append (list val key) keys)))
+		(apply dispatch-insert!
+		       (append
+			(list (getter node) val key)
+			keys))))))
+      (define right-inserter (create-child-inserter 'R))
+      (define left-inserter (create-child-inserter 'L))
+      (define (insert-right! node val key . keys)
+	(apply right-inserter
+	       (append (list node val key) keys)))
+      (define (insert-left! node val key . keys)
+	(apply left-inserter
+	       (append (list node val key) keys)))
+      (define (insert-val! node val key . keys)
+	(let ((nval (get-val node)))
 	  (cond
-	   ((eq? (get-key node) k) node)
-	   ((cmp k (get-key node))
-	    (if (eq? 'R (get-right node))
-		(get-right node)
-		(assoc-step k (get-right node))))
-	   (else
-	    (if (eq? 'L (get-left node))
-		(get-left node)
-		(assoc-step k (get-left node))))))
-	(assoc-step key (cdr table)))
-	   
-
-      (define (put! key val node)
-	(define (put-in-child! nnode child ckey new-value)
-	  (let ((get-child (get-access child))
-		(set-child! (get-modifier child)))
-		(if (eq? child (get-child nnode))
-		    (set-child! nnode (make-node ckey new-value))
-		    (put! ckey new-value (get-child nnode)))))
-	
-	(let ((node-key (get-key node)))
-	  (cond
-	   ((eq? key node-key)
-	    (set-val! node val))
-	   ((cmp key node-key)
-	    (put-in-child! node 'R key val))
-	   (else (put-in-child! node 'L key val)))))
-
-
-
-      
-      (define (put-in-table! val key . keys)
-	(let ((tbody (cdr table)))
-	  (cond
-	   ((null? tbody)
-	    (if (null? keys)
-		(set-cdr! table (make-node key val))
-		(let ((new-table (make-table cmp)))
-		  (apply (new-table 'put-in-table!)
-			 (cons val keys))
-		  (set-cdr! table (make-node key new-table)))))
 	   ((null? keys)
-	    (put! key val tbody))
+	    (set-val! node val))
+	   ((tablep nval)
+	    (apply (nval 'insert!) (cons val keys)))
 	   (else
-	    (let ((new-table (make-table cmp)))
-	      (apply (new-table 'put-in-table!)
-		     (cons val keys))
-	      (put! key new-table tbody))))
-	  table))
+	    (set-val! node
+		      (let ((new-table (make-table)))
+			(apply (new-table 'insert)
+			       (cons val keys))
+			new-table))))))
+
+      (define (dispatch-insert! node val key . keys)
+	(let ((nkey (get-key node)))
+	  (cond
+	   ((eq? nkey key)
+	    (apply insert-val! (append (list node val key) keys)))
+	   ((cmp key nkey)
+	    (apply insert-right! (append (list node val key) keys)))
+	   (else
+	    (apply insert-left! (append (list node val key) keys))))))
+
+      (define (insert! val key . keys)
+	(if (null? (cdr table))
+	    (set-cdr! table (apply make-node (append (list val key) keys)))
+	    (apply dispatch-insert!
+		   (append (list (cdr table) val key) keys)))
+	table)
+
+      (define (to->list)
+	(define (step->l node)
+	  (if 
+	   (or (atom? node)
+	       (null? node)) '()
+	       (let ((left (step->l (get-left node)))
+		     (right (step->l (get-right node))))
+
+		 (if (tablep (get-val node))
+		     (append
+		      (list (get-key node)
+		       (((get-val node) 'to->list)))
+		      left
+		      right)
+		     (append (list (get-key node)
+				   (get-val node))
+			     left
+			     right)))))
+	(step->l (cdr table)))
+	
 
       (cond
-       ((eq? sym 'put-in-table!) put-in-table!)
-       ((eq? sym 'assoc) assoc)
-       (else (error 'method-definition-not-found-*TABLE*)))
+       ((eq? _sym_table 'insert!) insert!)
+       ((eq? _sym_table 'assoc) assoc)
+       ((eq? _sym_table 'to->list) to->list)
+       (else (error 'definition-not-found)))
       )))
-
-(define (put-in-table! table . args)
-  (apply (table 'put-in-table!) args))
-
-
 
