@@ -1,64 +1,11 @@
-;;todo redesign queue in a simple manner
-;;todo refactoring the agenda definition
+(load "./structures.scm")
 
+;;wire
 
-
-(define (last-pair x)
-  (if (null? (cdr x)) x
-      (last-pair (cdr x))))
-
-(define (queue . args)
-  (if (null? args) (list 'queue-t)
-      (cons 'queue-t (cons args
-			   (last-pair args)))))
-
-(define (queue? q)
-  (and
-   (not (atom? q))
-   (eq? 'queue-t (car q))))
-
-(define (push! q value)
-  (if (queue? q)
-      (let ((lst (list value)))
-	(if (null? (cdr q))
-	    (set-cdr! q
-		      (cons lst lst))
-	    (begin
-	      (set-cdr! (cddr q) lst)
-	      (set-cdr! (cdr q) lst)))
-	
-	q)
-      (error 'not-a-queue)))
-
-(define (pop! q)
-  (if (queue? q)
-      (let ((lst (cadr q)))
-	(if (null? (cdr lst))
-	    (set-cdr! q '())
-	    (set-car! (cdr q)
-		      (cdr lst)))
-	(car lst))
-      (error 'not-a-queue)))
-
-(define (first-in-queue q)
-  (if (queue? q)
-      (caadr q)
-      (error 'not-a-queue)))
-
-(define (last-in-queue q)
-  (if (queue? q)
-      (caddr q)
-      (error 'not-a-queue)))
-
-
-
-
-;;logical gate simulator
 (define (call-each proc-list)
-  (if (null? proc-list) 'ok
-      (begin
-	((car proc-list))
-	(call-each (cdr proc-list)))))
+  (unless (null? proc-list)
+    ((car proc-list))
+    (call-each (cdr proc-list))))
 
 (define (make-wire)
   (let ((signal 0)
@@ -88,90 +35,104 @@
 (define (set-signal! wire new-signal) ((wire 'set-signal!) new-signal))
 (define (add-action! wire proc) ((wire 'add-action!) proc))
 
-(define (make-agenda) (list 0))
-(define (make-time-segment time proc) (cons time (queue proc)))
-(define (get-time segment) (car segment))
-(define (get-queue segment) (cdr segment))
-(define (add-time! agenda time)
-  (set-car! agenda (+ (get-time agenda) time)))
-(define (get-segments agenda) (cdr agenda))
-(define (set-segments! agenda segments)
-  (set-cdr! agenda segments))
-(define (empty-agenda? agenda)
-  (null? (get-segments agenda)))
-(define (get-first-segment agenda) (car (get-segments agenda)))
-
-
-(define (add-to-agenda! agenda time proc)
-  (define (add-step! new-segment segments)
-    (let ((first (car segments)))
-      (cond
-       ((equal? (get-time first) time)
-	(push! (get-queue first) proc))
-       ((< time (get-time first))
-	(begin
-	  (set-cdr! segments
-		    (cons first
-			  (cdr segments)))
-	  (set-car! segments new-segment)))
-       ((null? (cdr segments))
-	(set-cdr! segments new-segment))
-       (else
-	(add-step! new-segment (cdr segments))))))
-  
-  (if (null? (get-segments agenda))
-      (set-segments! agenda (make-time-segment time proc))
-      (add-step! (make-time-segment time proc) (get-segments agenda))))
-
-;; add-action! adds the proc to the proc list and executes it immediatly after
-;; this because all wires related actions are defined as after-delay, which
-;; add a record to the agenda when it is executed.
-;; In fact, the agenda is the core of the simulation through the propagate
-;; method which executes all the lambdas added via after-delay.
-
-;; The set-signal! wires' functioni set the new signal and call
-;; each procedure inside the proc list, which in turn should add
-;; new records to the agenda to be executed.
-;; This even-driven structure is like a cascade mechanic.
-;; A definition of queue is required.
-
 (define agenda (make-agenda))
+(define or-delay 2)
 
-(define (execute-first! agenda)
-  (let ((segments (get-segments agenda)))
-    (if (null? segments) 'empty-agenda
-	(let ((first (get-first-segment agenda)))
-	  (add-time! agenda (get-time first))
-	  ((pop! (get-queue first)))
-	  (when (null? (get-queue first))
-	    (set-cdr! agenda (cdr segments)))))))
+(define (after-delay time proc)
+  (add-agenda! agenda time proc))
 
-(define (propagate)
-  (unless (empty-agenda? agenda)
-    (begin
-      (execute-first! agenda)
-      (propagate))))
-
-
-(define (after-delay delay proc)
-  (add-to-agenda! agenda
-		  delay
-		  proc)
-  (proc))
-
-(define or-delay 1)
-(define (logical-or a b)
-  (if (or (get-signal a)
-	  (get-signal b))
-      1
-      0))
+(define (debug-wire name wire)
+  (print "--------------------")
+  (print "Name = " name)
+  (print "Signal = " (get-signal wire))
+  (print "--------------------"))
 
 (define (or-gate a b out)
   (define (or-action)
-    (let ((new-sig
-	   (logical-or a b)))
-      (after-delay or-delay
-		   (lambda ()
-		     (set-signal! out new-sig)))))
-  (add-action! a or-action)
-  (add-action! b or-action)) 
+    (let ((a-sig (get-signal a))
+	  (b-sig (get-signal b)))
+      (when (or (= 1 a-sig)
+		(= 1 b-sig))
+	(set-signal! out 1))))
+  
+  (add-action! a
+	       (lambda ()
+		 (after-delay or-delay or-action)))
+  (add-action! b
+	       (lambda ()
+		 (after-delay or-delay or-action))))
+
+
+(define (simple-test-or-gate)
+
+  (define a (make-wire))
+  (define b (make-wire))
+  (define c (make-wire))
+  (define d (make-wire))
+  (define out (make-wire))
+
+  (or-gate a b c)
+  (or-gate c d out)
+
+  (set-signal! a 1)
+  (add-action! out (lambda () (debug-wire 'result out)))
+
+  (execute-agenda! agenda))
+
+(define nand-delay 2)
+
+(define (logical-and sig1 sig2)
+  (and (= 1 sig1)
+       (= 1 sig2)))
+
+(define (nand-gate a b out)
+  (define (nand-action)
+    (let ((a-sig (get-signal a))
+	  (b-sig (get-signal b)))
+      (if (logical-and a-sig b-sig)
+	  (set-signal! out 0)
+	  (set-signal! out 1))))
+  (add-action! a 
+	       (lambda ()
+		 (after-delay nand-delay
+			      nand-action)))
+  (add-action! b 
+	       (lambda ()
+		 (after-delay nand-delay
+			      nand-action))))
+
+(define (not-gate a out)
+  (nand-gate a a out))
+  
+;;test nand-gate
+(define (simple-test-nand-gate)
+  (define a (make-wire))
+  (define out (make-wire))
+
+  (not-gate a out)
+
+  (add-action! out (lambda () (debug-wire 'result out))))
+
+
+(define (and-gate a b out)
+  (let ((internal-wire (make-wire)))
+    (nand-gate a b internal-wire)
+    (not-gate internal-wire out)))
+
+(define (simple-test-and-gate)
+  (let ((a (make-wire))
+	(b (make-wire))
+	(out (make-wire)))
+    
+    (and-gate a b out)
+    (add-action! out
+		 (lambda () (debug-wire 'phase-1 out)))
+    (set-signal! a 1)
+    (add-action! out
+		 (lambda () (debug-wire 'phase-2 out)))
+    (set-signal! b 1)
+    (add-action! out
+		 (lambda () (debug-wire 'phase-3 out)))
+    (execute-agenda! agenda)))
+
+
